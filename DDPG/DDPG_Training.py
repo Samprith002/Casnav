@@ -64,8 +64,6 @@ register(
     entry_point='__main__:CrowdNavigationEnv',
 )
 
-env = gym.make('CrowdNavigation-v0')
-
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
