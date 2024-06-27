@@ -9,6 +9,10 @@ import os
 import gym
 from gym import spaces
 import numpy as np
+import torch.nn.functional as F
+import random
+import warnings
+warnings.filterwarnings('ignore')
 
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -27,7 +31,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.reset()
 
     def _random_position(self):
-        return [np.random.uniform(0, self.grid_size), np.random.uniform(0, self.grid_size)]
+        return [np.random.uniform(0, self.grid_size - 1), np.random.uniform(0, self.grid_size - 1)]
 
     def _random_velocity(self):
         return [np.random.uniform(-1, 1), np.random.uniform(-1, 1)]
@@ -41,9 +45,18 @@ class ContinuousRobotNavigationEnv(gym.Env):
 
     def predict_human_positions(self):
         for i in range(self.num_humans):
+            # Update position
             self.human_positions[i][0] += self.human_velocities[i][0]
             self.human_positions[i][1] += self.human_velocities[i][1]
-            self.human_positions[i] = np.clip(self.human_positions[i], 0, self.grid_size-1)
+
+            # Check for boundary collisions and reverse velocity if necessary
+            if self.human_positions[i][0] < 0 or self.human_positions[i][0] >= self.grid_size:
+                self.human_velocities[i][0] = -self.human_velocities[i][0]
+                self.human_positions[i][0] = np.clip(self.human_positions[i][0], 0, self.grid_size - 1)
+
+            if self.human_positions[i][1] < 0 or self.human_positions[i][1] >= self.grid_size:
+                self.human_velocities[i][1] = -self.human_velocities[i][1]
+                self.human_positions[i][1] = np.clip(self.human_positions[i][1], 0, self.grid_size - 1)
 
     def step(self, action):
         # Scale action to the grid size
@@ -51,7 +64,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.robot_position[0] += action[0]
         self.robot_position[1] += action[1]
 
-        self.robot_position = np.clip(self.robot_position, 0, self.grid_size-1)
+        self.robot_position = np.clip(self.robot_position, 0, self.grid_size - 1)
         self.state = np.array(self.robot_position, dtype=np.float32)
 
         done = np.array_equal(self.robot_position, list(self.goal_position))
@@ -80,7 +93,6 @@ class ContinuousRobotNavigationEnv(gym.Env):
         plt.imshow(grid, cmap='hot', interpolation='nearest')
         plt.show()
 
-# Register the environment with OpenAI Gym
 from gym.envs.registration import register
 
 register(
@@ -89,8 +101,7 @@ register(
     max_episode_steps=100,
 )
 
-import torch.nn.functional as F
-import random
+
 class Actor(nn.Module):
     def __init__(self, state_dim, action_dim, max_action):
         super(Actor, self).__init__()
@@ -207,6 +218,7 @@ policy_delay = 2
 REPLAY_BUFFER_SIZE = 1e6
 BATCH_SIZE = 100
 
+
 if __name__ == '__main__':
     env = gym.make('ContinuousRobotNavigation-v0')
     state_dim = env.observation_space.shape[0]
@@ -216,7 +228,7 @@ if __name__ == '__main__':
     td3 = TD3(state_dim, action_dim, max_action)
 
     # Training loop
-    num_episodes = 100
+    num_episodes = 1000
     episode_rewards = []
 
     for episode in range(num_episodes):
