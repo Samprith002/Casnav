@@ -198,7 +198,6 @@ class TD3(object):
             self.replay_buffer.pop(0)
 
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 discount = 0.99
 tau = 0.005
@@ -207,7 +206,6 @@ noise_clip = 0.5
 policy_delay = 2
 REPLAY_BUFFER_SIZE = 1e6
 BATCH_SIZE = 100
-
 
 if __name__ == '__main__':
     env = gym.make('ContinuousRobotNavigation-v0')
@@ -230,6 +228,7 @@ if __name__ == '__main__':
             td3.add_to_replay_buffer(state, action, next_state, reward, done or truncated)
             state = next_state
             episode_reward += reward
+            env.render()  # Render the environment at each step
             if done or truncated:
                 break
         td3.train(100)
