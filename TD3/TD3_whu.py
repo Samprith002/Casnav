@@ -91,8 +91,10 @@ class ContinuousRobotNavigationEnv(gym.Env):
             grid[tuple(map(int, human_pos))] = -1
 
         plt.imshow(grid, cmap='hot', interpolation='nearest')
+        plt.ion()
         plt.show()
 
+# Register the environment with OpenAI Gym
 from gym.envs.registration import register
 
 register(
@@ -228,7 +230,7 @@ if __name__ == '__main__':
     td3 = TD3(state_dim, action_dim, max_action)
 
     # Training loop
-    num_episodes = 1000
+    num_episodes = 100
     episode_rewards = []
 
     for episode in range(num_episodes):
@@ -247,7 +249,6 @@ if __name__ == '__main__':
         episode_rewards.append(episode_reward)
         print(f"Episode {episode}, Reward: {episode_reward}")
 
-    # Plot cumulative rewards
     plt.plot(range(num_episodes), episode_rewards)
     plt.xlabel('Episode')
     plt.ylabel('Cumulative Reward')
