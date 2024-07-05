@@ -4,6 +4,8 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
+import imageio
+from matplotlib.animation import FuncAnimation, PillowWriter
 from collections import deque
 import os
 import gym
@@ -23,7 +25,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.observation_space = spaces.Box(low=0, high=self.grid_size, shape=(2,), dtype=np.float32)
         self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)  # Continuous action space
 
-        self.num_humans = 5  # Number of humans
+        self.num_humans = 4  # Number of humans
         self.human_positions = [self._random_position() for _ in range(self.num_humans)]
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
         self.goal_position = (9, 9)
@@ -90,9 +92,10 @@ class ContinuousRobotNavigationEnv(gym.Env):
         for human_pos in self.human_positions:
             grid[tuple(map(int, human_pos))] = -1
 
-        plt.imshow(grid, cmap='hot', interpolation='nearest')
+        plt.imshow(grid, cmap='coolwarm', interpolation='nearest')
         plt.ion()
         plt.show()
+
 
 # Register the environment with OpenAI Gym
 from gym.envs.registration import register
@@ -102,6 +105,17 @@ register(
     entry_point='__main__:ContinuousRobotNavigationEnv',
     max_episode_steps=100,
 )
+
+# Example usage
+if __name__ == '__main__':
+    env = gym.make('ContinuousRobotNavigation-v0')
+    state = env.reset()
+    for _ in range(20):
+        action = env.action_space.sample()
+        state, reward, done, truncated, _ = env.step(action)
+        env.render()
+        if done or truncated:
+            break
 
 
 class Actor(nn.Module):
@@ -116,8 +130,6 @@ class Actor(nn.Module):
         a = F.relu(self.l1(state))
         a = F.relu(self.l2(a))
         return self.max_action * torch.tanh(self.l3(a))
-
-
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
@@ -129,7 +141,6 @@ class Critic(nn.Module):
         q = F.relu(self.l1(torch.cat([state, action], 1)))
         q = F.relu(self.l2(q))
         return self.l3(q)
-
 
 class TD3(object):
     def __init__(self, state_dim, action_dim, max_action):
@@ -159,7 +170,6 @@ class TD3(object):
             return
 
         for it in range(iterations):
-            # Sample a batch of transitions from replay buffer
             batch = random.sample(self.replay_buffer, BATCH_SIZE)
             state, next_state, action, reward, done = zip(*batch)
             state = torch.FloatTensor(np.array(state)).to(device)
@@ -168,36 +178,28 @@ class TD3(object):
             reward = torch.FloatTensor(np.array(reward)).to(device)
             done = torch.FloatTensor(np.array(done)).to(device)
 
-            # Compute the target Q value
             noise = (torch.randn_like(action) * policy_noise).clamp(-noise_clip, noise_clip)
             next_action = (self.actor_target(next_state) + noise).clamp(-self.max_action, self.max_action)
             target_Q1 = self.critic1_target(next_state, next_action)
             target_Q2 = self.critic2_target(next_state, next_action)
             target_Q = reward + ((1 - done) * discount * torch.min(target_Q1, target_Q2)).detach()
 
-            # Get current Q estimates
             current_Q1 = self.critic1(state, action)
             current_Q2 = self.critic2(state, action)
 
-            # Compute critic loss
             critic_loss = F.mse_loss(current_Q1, target_Q) + F.mse_loss(current_Q2, target_Q)
 
-            # Optimize the critic
             self.critic_optimizer.zero_grad()
             critic_loss.backward()
             self.critic_optimizer.step()
 
-            # Delayed policy updates
             if it % policy_delay == 0:
-                # Compute actor loss
                 actor_loss = -self.critic1(state, self.actor(state)).mean()
 
-                # Optimize the actor
                 self.actor_optimizer.zero_grad()
                 actor_loss.backward()
                 self.actor_optimizer.step()
 
-                # Update the frozen target models
                 for param, target_param in zip(self.critic1.parameters(), self.critic1_target.parameters()):
                     target_param.data.copy_(tau * param.data + (1 - tau) * target_param.data)
                 for param, target_param in zip(self.critic2.parameters(), self.critic2_target.parameters()):
@@ -210,7 +212,6 @@ class TD3(object):
         if len(self.replay_buffer) > REPLAY_BUFFER_SIZE:
             self.replay_buffer.pop(0)
 
-
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 discount = 0.99
 tau = 0.005
@@ -219,7 +220,6 @@ noise_clip = 0.5
 policy_delay = 2
 REPLAY_BUFFER_SIZE = 1e6
 BATCH_SIZE = 100
-
 
 if __name__ == '__main__':
     env = gym.make('ContinuousRobotNavigation-v0')
