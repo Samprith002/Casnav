@@ -4,6 +4,7 @@ import torch.nn as nn
 import torch.optim as optim
 import numpy as np
 import matplotlib.pyplot as plt
+import io
 import imageio
 from matplotlib.animation import FuncAnimation, PillowWriter
 from collections import deque
@@ -33,6 +34,8 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
         self.goal_position = (9, 9)
 
+        self.frames = []  # Initialize the frames list
+
         self.reset()
 
     def _random_position(self):
@@ -46,6 +49,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.human_positions = [self._random_position() for _ in range(self.num_humans)]
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
         self.state = np.array(self.robot_position, dtype=np.float32)
+        self.frames = []  # Reset frames list at the start of each episode
         return self.state
 
     def predict_human_positions(self):
@@ -60,6 +64,12 @@ class ContinuousRobotNavigationEnv(gym.Env):
             if self.human_positions[i][1] < 0 or self.human_positions[i][1] >= self.grid_size:
                 self.human_velocities[i][1] *= -1
 
+    def check_collision(self):
+        for human_pos in self.human_positions:
+            if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) < 1.0:  # Collision threshold
+                return True
+        return False
+
     def step(self, action):
         self.robot_position[0] += action[0]
         self.robot_position[1] += action[1]
@@ -72,6 +82,10 @@ class ContinuousRobotNavigationEnv(gym.Env):
         reward = -np.linalg.norm(np.array(self.robot_position) - np.array(self.goal_position))
 
         done = np.array_equal(self.robot_position, self.goal_position)
+
+        if self.check_collision():
+            reward -= 10  # Penalty for collision
+            done = True  # End episode on collision
 
         self.state = np.array(self.robot_position, dtype=np.float32)
         info = {}  # Add any additional info you want to pass
@@ -86,13 +100,17 @@ class ContinuousRobotNavigationEnv(gym.Env):
             grid[tuple(map(int, np.clip(human_pos, 0, self.grid_size - 1)))] = -1
 
         plt.imshow(grid, cmap='coolwarm', interpolation='nearest')
-        plt.ion()
-        plt.show()
-        plt.pause(0.001)
+        plt.axis('off')
+
+        # Save frame to list
+        buf = io.BytesIO()
+        plt.savefig(buf, format='png')
+        buf.seek(0)
+        self.frames.append(imageio.imread(buf))
+        buf.close()
         plt.clf()
 
 
-# Register the environment with OpenAI Gym
 from gym.envs.registration import register
 
 register(
@@ -107,7 +125,7 @@ class Attention(nn.Module):
         self.query_layer = nn.Linear(input_dim, hidden_dim)
         self.key_layer = nn.Linear(input_dim, hidden_dim)
         self.value_layer = nn.Linear(input_dim, hidden_dim)
-        self.output_layer = nn.Linear(hidden_dim, input_dim)  # Project back to the original dimension
+        self.output_layer = nn.Linear(hidden_dim, input_dim)  
         self.softmax = nn.Softmax(dim=-1)
         
     def forward(self, x):
@@ -119,7 +137,7 @@ class Attention(nn.Module):
         attention_weights = self.softmax(scores)
         
         attended_values = torch.matmul(attention_weights, values)
-        attended_values = self.output_layer(attended_values)  # Project back to the original dimension
+        attended_values = self.output_layer(attended_values)  
         return attended_values, attention_weights
 
 class Actor(nn.Module):
@@ -312,12 +330,15 @@ def main():
             replay_buffer.add(state, action, next_state, reward, done)
             state = next_state
             episode_reward += reward
-            env.render()  # Render the environment at each step
+            env.render()  
             if done:
                 break
         td3_agent.train(replay_buffer, batch_size=100)
         episode_rewards.append(episode_reward)
         print(f"Episode {episode}, Reward: {episode_reward}")
+
+        # Save GIF
+        imageio.mimsave(f'episode_{episode}.gif', env.frames, fps=10)
 
     plt.plot(range(num_episodes), episode_rewards)
     plt.xlabel('Episode')
@@ -327,3 +348,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
