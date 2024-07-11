@@ -203,6 +203,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
 
 
 
+
 from gym.envs.registration import register
 
 register(
@@ -281,6 +282,7 @@ class Critic(nn.Module):
         q2 = self.l6(q2)
         return q1, q2
 
+
 class ReplayBuffer:
     def __init__(self, state_dim, action_dim, max_size=int(1e6)):
         self.max_size = max_size
@@ -312,6 +314,7 @@ class ReplayBuffer:
             torch.FloatTensor(self.reward[ind]).to(device),
             torch.FloatTensor(self.not_done[ind]).to(device)
         )
+
 
 class TD3:
     def __init__(
@@ -388,6 +391,7 @@ class TD3:
                 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
+
 
 
 discount = 0.99
