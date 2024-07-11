@@ -37,7 +37,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         super(ContinuousRobotNavigationEnv, self).__init__()
         self.grid_size = 10
         self.num_obstacles = 3
-        self.observation_radius = 3  # Observation range radius
+        self.observation_radius = 4  # Observation range radius
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.observation_radius * 2 + 1, self.observation_radius * 2 + 1), dtype=np.float32)
         self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)  # Continuous action space
 
@@ -45,9 +45,10 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.human_positions = [self._random_position() for _ in range(self.num_humans)]
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
         self.obstacle_positions = [self._random_position() for _ in range(self.num_obstacles)]
-        self.predicted_human_positions = [[] for _ in range(self.num_humans)]
+        # self.predicted_human_positions = [[] for _ in range(self.num_humans)]
         self.lidar_range = 4.0
         self.goal_position = (9, 9)
+        self.predicted_human_positions = [[] for _ in range(self.num_humans)]
 
         self.maze_walls = [
             (3, 7, 0.5, 4),   # Example wall 1
@@ -65,7 +66,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         return [np.random.uniform(0, self.grid_size - 1), np.random.uniform(0, self.grid_size - 1)]
 
     def _random_velocity(self):
-        return [np.random.uniform(-1, 1), np.random.uniform(-1, 1)]
+        return [np.random.uniform(-0.5, 0.5), np.random.uniform(-0.5, 0.5)]
 
     def reset(self):
         self.robot_orientation = np.pi/4  #looking diagonally up
@@ -110,6 +111,25 @@ class ContinuousRobotNavigationEnv(gym.Env):
                 self.human_velocities[i][0] *= -1
             if self.human_positions[i][1] < 0 or self.human_positions[i][1] >= self.grid_size:
                 self.human_velocities[i][1] *= -1
+
+            # Predict future positions
+            future_positions = []
+            future_position = self.human_positions[i].copy()
+            future_velocity = self.human_velocities[i].copy()
+            for _ in range(5):  # Predict 5 steps into the future
+                future_position[0] += future_velocity[0]
+                future_position[1] += future_velocity[1]
+
+                if future_position[0] < 0 or future_position[0] >= self.grid_size:
+                    future_velocity[0] *= -1
+                if future_position[1] < 0 or future_position[1] >= self.grid_size:
+                    future_velocity[1] *= -1
+
+                future_positions.append(future_position.copy())
+
+            self.predicted_human_positions[i] = future_positions
+
+
 
     def check_collision(self):
         for human_pos in self.human_positions:
@@ -171,6 +191,12 @@ class ContinuousRobotNavigationEnv(gym.Env):
         obs_range = plt.Circle(self.robot_position, self.observation_radius, color='gray', alpha=0.2)
         ax.add_artist(obs_range)
 
+        for predicted_positions in self.predicted_human_positions:
+            for future_pos in predicted_positions:
+                if np.linalg.norm(np.array(future_pos) - np.array(self.robot_position)) <= self.observation_radius:
+                    future_circle = plt.Circle(future_pos, 0.2, color='pink', alpha=0.3)
+                    ax.add_artist(future_circle)
+
         arrow_length = 0.7
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
@@ -182,8 +208,6 @@ class ContinuousRobotNavigationEnv(gym.Env):
             rect = plt.Rectangle((x, y), width, height, color='black')
             ax.add_patch(rect)
 
-        # lidar_circle = plt.Circle(self.robot_position, self.lidar_range, color='gray', alpha=0.2)
-        # ax.add_artist(lidar_circle)
     
         plt.axis('off')
     
@@ -194,14 +218,6 @@ class ContinuousRobotNavigationEnv(gym.Env):
         frame = imageio.imread(buf)
         self.frames.append(frame)
         buf.close()
-
-        # Show the plot in real-time
-        plt.imshow(frame)
-        plt.axis('off')
-        plt.pause(0.1)
-        plt.clf()
-
-
 
 
 from gym.envs.registration import register
@@ -253,6 +269,7 @@ class Actor(nn.Module):
         a = F.relu(self.l2(a))
         return self.max_action * torch.tanh(self.l3(a))
 
+
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
         super(Critic, self).__init__()
@@ -281,6 +298,7 @@ class Critic(nn.Module):
         q2 = F.relu(self.l5(q2))
         q2 = self.l6(q2)
         return q1, q2
+
 
 
 class ReplayBuffer:
@@ -391,7 +409,6 @@ class TD3:
                 
             for param, target_param in zip(self.actor.parameters(), self.actor_target.parameters()):
                 target_param.data.copy_(self.tau * param.data + (1 - self.tau) * target_param.data)
-
 
 
 discount = 0.99
