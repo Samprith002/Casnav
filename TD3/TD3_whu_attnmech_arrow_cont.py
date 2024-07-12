@@ -21,44 +21,43 @@ warnings.filterwarnings('ignore')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
 
     def is_goal_behind_wall(self, goal_position):
-        # Check if goal_position is behind any wall
         for wall in self.maze_walls:
             x, y, width, height = wall
-            if goal_position[0] >= x and goal_position[0] <= x + width \
-                    and goal_position[1] >= y and goal_position[1] <= y + height:
+            if goal_position[0] >= x and goal_position[0] <= x + width and goal_position[1] >= y and goal_position[1] <= y + height:
                 return True
         return False
+    
 
     def __init__(self):
         super(ContinuousRobotNavigationEnv, self).__init__()
         self.grid_size = 10
         self.num_obstacles = 3
-        self.observation_radius = 4  # Observation range radius
+        self.observation_radius = 4 
         self.observation_space = spaces.Box(low=0, high=1, shape=(self.observation_radius * 2 + 1, self.observation_radius * 2 + 1), dtype=np.float32)
         self.action_space = spaces.Box(low=-1, high=1, shape=(2,), dtype=np.float32)  # Continuous action space
 
-        self.num_humans = 3  # Number of humans
+        self.num_humans = 3  
         self.human_positions = [self._random_position() for _ in range(self.num_humans)]
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
         self.obstacle_positions = [self._random_position() for _ in range(self.num_obstacles)]
-        # self.predicted_human_positions = [[] for _ in range(self.num_humans)]
         self.lidar_range = 4.0
         self.goal_position = (9, 9)
         self.predicted_human_positions = [[] for _ in range(self.num_humans)]
 
         self.maze_walls = [
-            (3, 7, 0.5, 4),   # Example wall 1
-            (7, 7, 0.5, 3),   # Example wall 2
-            (0, 5, 4, 0.5),   # Example wall 3
-            (5, 0, 0.5, 4),   # Example wall 4
-            # (8, 0, 0.5, 6)    #5th wall
+            (5, 8, 0.3, 1.5),  
+            (0, 7, 1.5, 0.3),  
+            (4, 4.5, 0.3, 1.5),  
+            (5, 2.5, 1.5, 0.3), 
+            (8, 4, 1.5, 0.3)  
         ]
 
-        self.frames = []  # Initialize the frames list
+        self.frames = []  
 
         self.reset()
 
@@ -66,10 +65,10 @@ class ContinuousRobotNavigationEnv(gym.Env):
         return [np.random.uniform(0, self.grid_size - 1), np.random.uniform(0, self.grid_size - 1)]
 
     def _random_velocity(self):
-        return [np.random.uniform(-0.5, 0.5), np.random.uniform(-0.5, 0.5)]
+        return [np.random.uniform(-0.25, 0.25), np.random.uniform(-0.25, 0.25)]
 
     def reset(self):
-        self.robot_orientation = np.pi/4  #looking diagonally up
+        self.robot_orientation = np.pi/4  
         self.robot_position = [0, 0]
         self.human_positions = [self._random_position() for _ in range(self.num_humans)]
         self.human_velocities = [self._random_velocity() for _ in range(self.num_humans)]
@@ -80,7 +79,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
             self.goal_position = self._random_position()
             if not self.is_goal_behind_wall(self.goal_position):
                 break
-        self.frames = []  # Reset frames list at the start of each episode
+        self.frames = [] 
         return self.state
 
     def _get_observation(self):
@@ -102,122 +101,176 @@ class ContinuousRobotNavigationEnv(gym.Env):
 
     def predict_human_positions(self):
         for i in range(self.num_humans):
-            # Update position
+            
+            next_position = [
+                self.human_positions[i][0] + self.human_velocities[i][0],
+                self.human_positions[i][1] + self.human_velocities[i][1]
+            ]
+    
+            if next_position[0] < 0 or next_position[0] >= self.grid_size:
+                self.human_velocities[i][0] *= -1
+            if next_position[1] < 0 or next_position[1] >= self.grid_size:
+                self.human_velocities[i][1] *= -1
+    
+            for wall in self.maze_walls:
+                x, y, width, height = wall
+                if (x <= next_position[0] <= x + width) and (y <= next_position[1] <= y + height):
+                    if x <= next_position[0] <= x + width:
+                        self.human_velocities[i][0] *= -1
+                    if y <= next_position[1] <= y + height:
+                        self.human_velocities[i][1] *= -1
+    
             self.human_positions[i][0] += self.human_velocities[i][0]
             self.human_positions[i][1] += self.human_velocities[i][1]
-
-            # Check for boundary collisions and reverse velocity if necessary
-            if self.human_positions[i][0] < 0 or self.human_positions[i][0] >= self.grid_size:
-                self.human_velocities[i][0] *= -1
-            if self.human_positions[i][1] < 0 or self.human_positions[i][1] >= self.grid_size:
-                self.human_velocities[i][1] *= -1
-
-            # Predict future positions
+    
             future_positions = []
             future_position = self.human_positions[i].copy()
             future_velocity = self.human_velocities[i].copy()
-            for _ in range(5):  # Predict 5 steps into the future
+            for _ in range(5): 
                 future_position[0] += future_velocity[0]
                 future_position[1] += future_velocity[1]
-
+    
                 if future_position[0] < 0 or future_position[0] >= self.grid_size:
                     future_velocity[0] *= -1
                 if future_position[1] < 0 or future_position[1] >= self.grid_size:
                     future_velocity[1] *= -1
+    
 
+                for wall in self.maze_walls:
+                    x, y, width, height = wall
+                    if (x <= future_position[0] <= x + width) and (y <= future_position[1] <= y + height):
+                        if x <= future_position[0] <= x + width:
+                            future_velocity[0] *= -1
+                        if y <= future_position[1] <= y + height:
+                            future_velocity[1] *= -1
+    
                 future_positions.append(future_position.copy())
-
+    
             self.predicted_human_positions[i] = future_positions
-
-
 
     def check_collision(self):
         for human_pos in self.human_positions:
             if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) < 1.0:  # Collision threshold
                 return True
-
+    
         for obstacle_pos in self.obstacle_positions:
             if np.linalg.norm(np.array(self.robot_position) - np.array(obstacle_pos)) < 1.0:  # Collision threshold
                 return True
+    
+        for wall in self.maze_walls:
+            x, y, width, height = wall
+            if (x <= self.robot_position[0] <= x + width) and (y <= self.robot_position[1] <= y + height):
+                return True
+
         return False
 
     def step(self, action):
         self.previous_position = self.robot_position.copy()
         self.robot_position[0] += action[0]
         self.robot_position[1] += action[1]
-
+    
         self.robot_position[0] = np.clip(self.robot_position[0], 0, self.grid_size - 1)
         self.robot_position[1] = np.clip(self.robot_position[1], 0, self.grid_size - 1)
-
+    
         if np.linalg.norm(action) > 0:
             self.robot_orientation = np.arctan2(action[1], action[0])
-
+    
         self.predict_human_positions()
+    
+        distance_to_goal = np.linalg.norm(np.array(self.robot_position) - np.array(self.goal_position))
+        reward = -distance_to_goal
+    
+        if distance_to_goal < 0.5: 
+            reward += 100  
+            done = True
+        else:
+            collision = self.check_collision()
+            if collision:
+                reward -= 10  
+                done = True
+            else:
+                done = False
+    
+        return self.state, reward, done, {}
 
-        reward = -np.linalg.norm(np.array(self.robot_position) - np.array(self.goal_position))
-
-        done = np.array_equal(self.robot_position, self.goal_position)
-
-        if self.check_collision():
-            reward -= 10  # Penalty for collision
-            done = True  # End episode on collision
-
-        self.state = self._get_observation()
-        info = {}  # Add any additional info you want to pass
-
-        return self.state, reward, done, info
 
     def render(self, mode='human'):
-        plt.figure(figsize=(6, 6))
-        ax = plt.gca()
+        fig, ax = plt.subplots(figsize=(6, 6))
         ax.set_xlim(0, self.grid_size)
         ax.set_ylim(0, self.grid_size)
         ax.set_aspect('equal')
     
-        # Draw the goal position
-        goal = plt.Circle(self.goal_position, 0.5, color='green')
+        # Set the background color
+        ax.set_facecolor('lightgray')
+        fig.patch.set_facecolor('lightgray')
+    
+        # Plot the goal position
+        goal = plt.Circle(self.goal_position, 0.5, color='darkgreen')
         ax.add_artist(goal)
     
-        # Draw the robot
-        robot = plt.Circle(self.robot_position, 0.5, color='red')
+        # Plot the robot position
+        robot = plt.Circle(self.robot_position, 0.5, color='darkblue')
         ax.add_artist(robot)
-    
-        # Draw the humans
+
+    # Plot human positions
         for human_pos in self.human_positions:
-            human = plt.Circle(human_pos, 0.5, color='blue')
+            human = plt.Circle(human_pos, 0.5, color='darkred')
             ax.add_artist(human)
     
-        # Draw the robot's observation range
-        obs_range = plt.Circle(self.robot_position, self.observation_radius, color='gray', alpha=0.2)
-        ax.add_artist(obs_range)
+        # Plot the maze walls
+        for wall in self.maze_walls:
+            x, y, width, height = wall
+            rect = plt.Rectangle((x, y), width, height, color='black')
+            ax.add_patch(rect)
+    
+        # Plot observation range, ensuring it doesn't pass through walls
+        from shapely.geometry import Point, LineString, box
+    
+        def intersects_wall(start, end):
+            line = LineString([start, end])
+            for wall in self.maze_walls:
+                wall_box = box(wall[0], wall[1], wall[0] + wall[2], wall[1] + wall[3])
+                if line.intersects(wall_box):
+                    return True
+            return False
+    
+        observation_range = self.observation_radius
+        angles = np.linspace(0, 2 * np.pi, 360)
+        x0, y0 = self.robot_position
 
+        for angle in angles:
+            x1 = x0 + observation_range * np.cos(angle)
+            y1 = y0 + observation_range * np.sin(angle)
+            if not intersects_wall((x0, y0), (x1, y1)):
+                line = plt.Line2D((x0, x1), (y0, y1), color='gray', alpha=0.2)
+                ax.add_line(line)
+    
+        # Plot predicted human trajectories only if within observation range
         for predicted_positions in self.predicted_human_positions:
             for future_pos in predicted_positions:
                 if np.linalg.norm(np.array(future_pos) - np.array(self.robot_position)) <= self.observation_radius:
-                    future_circle = plt.Circle(future_pos, 0.2, color='pink', alpha=0.3)
-                    ax.add_artist(future_circle)
-
+                    if not intersects_wall(self.robot_position, future_pos):
+                        future_circle = plt.Circle(future_pos, 0.4, color='indigo', alpha=0.3)
+                        ax.add_artist(future_circle)
+    
+        # Plot the direction arrow of the robot
         arrow_length = 0.7
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
         arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, color='black', width=0.1)
         ax.add_patch(arrow)
-        
-        for wall in self.maze_walls:
-            x, y, width, height = wall
-            rect = plt.Rectangle((x, y), width, height, color='black')
-            ax.add_patch(rect)
-
     
+        # Hide the axis
         plt.axis('off')
     
-        # Save frame to list
+        # Save the frame
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
         frame = imageio.imread(buf)
         self.frames.append(frame)
         buf.close()
+
 
 
 from gym.envs.registration import register
