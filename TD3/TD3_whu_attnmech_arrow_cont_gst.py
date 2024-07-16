@@ -38,13 +38,10 @@ class GumbelSocialTransformer(nn.Module):
         return x
 
     def predict(self, agent_positions, agent_velocities):
-        # Prepare the input tensor
         input_data = torch.tensor(agent_positions + agent_velocities, dtype=torch.float32)
-        # Combine positions and velocities along the sequence dimension
-        input_data = input_data.unsqueeze(0)  # Add batch dimension
+        input_data = input_data.unsqueeze(0)  
         predicted_trajectories = self.forward(input_data)
         return predicted_trajectories.squeeze(0).detach().numpy()
-
 
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -240,56 +237,38 @@ class ContinuousRobotNavigationEnv(gym.Env):
         ax.set_ylim(0, self.grid_size)
         ax.set_aspect('equal')
     
-        # Set the background color
         ax.set_facecolor('lightgray')
         fig.patch.set_facecolor('lightgray')
     
-        # Plot the goal position
         goal = plt.Circle(self.goal_position, 0.5, color='darkgreen')
         ax.add_artist(goal)
     
-        # Plot the robot position
         robot = plt.Circle(self.robot_position, 0.5, color='darkblue')
         ax.add_artist(robot)
         
-        # Add an arrow to indicate the robot's orientation
         arrow_length = 0.5
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
-        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.5, head_length=0.7, fc='black', ec='black')
+        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.3, fc='yellow', ec='yellow')
         ax.add_patch(arrow)
     
-        # Plot human positions
-        for human_pos in self.human_positions:
+        for i, human_pos in enumerate(self.human_positions):
             human = plt.Circle(human_pos, 0.5, color='darkred')
             ax.add_artist(human)
+            if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
+                predicted_positions = self.predicted_human_positions[i]
+                for pos in predicted_positions:
+                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
+                    ax.add_artist(predicted_circle)
     
-        # Plot the maze walls
         for wall in self.maze_walls:
             x, y, width, height = wall
             rect = plt.Rectangle((x, y), width, height, color='black')
             ax.add_patch(rect)
     
-        # Plot observation range, ensuring it doesn't pass through walls
-        from shapely.geometry import Point, LineString, box
+        observation_circle = plt.Circle(self.robot_position, self.observation_radius, color='blue', fill=False, linestyle='--')
+        ax.add_artist(observation_circle)
     
-        def intersects_wall(start, end):
-            line = LineString([start, end])
-            for wall in self.maze_walls:
-                wall_box = box(wall[0], wall[1], wall[0] + wall[2], wall[1] + wall[3])
-                if line.intersects(wall_box):
-                    return True
-            return False
-    
-        observation_range = self.observation_radius
-        angles = np.linspace(0, 2 * np.pi, 100)
-        for angle in angles:
-            end = (self.robot_position[0] + observation_range * np.cos(angle),
-                   self.robot_position[1] + observation_range * np.sin(angle))
-            if not intersects_wall(self.robot_position, end):
-                ax.plot([self.robot_position[0], end[0]], [self.robot_position[1], end[1]], 'k-', lw=0.5)
-    
-        # Save the current frame
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
@@ -310,15 +289,22 @@ class ContinuousRobotNavigationEnv(gym.Env):
         arrow_length = 0.5
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
-        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.5, head_length=0.7, fc='black', ec='black')
+        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.3, fc='yellow', ec='yellow')
         ax.add_patch(arrow)
-        for human_pos in self.human_positions:
+        for i, human_pos in enumerate(self.human_positions):
             human = plt.Circle(human_pos, 0.5, color='darkred')
             ax.add_artist(human)
+            if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
+                predicted_positions = self.predicted_human_positions[i]
+                for pos in predicted_positions:
+                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
+                    ax.add_artist(predicted_circle)
         for wall in self.maze_walls:
             x, y, width, height = wall
             rect = plt.Rectangle((x, y), width, height, color='black')
             ax.add_patch(rect)
+        observation_circle = plt.Circle(self.robot_position, self.observation_radius, color='blue', fill=False, linestyle='--')
+        ax.add_artist(observation_circle)
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
@@ -527,7 +513,6 @@ def main():
     td3_agent = TD3(state_dim, action_dim, max_action)
     replay_buffer = ReplayBuffer(state_dim, action_dim)
     
-    # Training loop
     num_episodes = 100
     episode_rewards = []
     
@@ -536,12 +521,9 @@ def main():
         episode_reward = 0
         for t in range(100):
             action = td3_agent.select_action(state.flatten())
-    
-            # Incorporate the Gumbel Social Transformer predictions
+            
             agent_positions, agent_velocities = env.prepare_trajectory_data()
             predicted_trajectories = gumbel_social_transformer.predict(agent_positions, agent_velocities)
-            # Use predicted_trajectories to modify action or environment dynamics as needed
-            # For this example, we print the predicted trajectories
             print(predicted_trajectories)
     
             next_state, reward, done, _ = env.step(action)
@@ -555,7 +537,6 @@ def main():
         episode_rewards.append(episode_reward)
         print(f"Episode {episode}, Reward: {episode_reward}")
     
-        # Save GIF if frames are available
         if env.frames:
             imageio.mimsave(f'episode_{episode}.gif', env.frames, fps=10)
     
