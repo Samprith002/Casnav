@@ -15,6 +15,7 @@ from gym import spaces
 import numpy as np
 import torch.nn.functional as F
 import random
+import math
 import copy
 import warnings
 from matplotlib.patches import FancyArrow
@@ -23,25 +24,57 @@ warnings.filterwarnings('ignore')
 
 device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-class GumbelSocialTransformer(nn.Module):
-    def __init__(self, input_dim, hidden_dim, num_heads, num_layers, output_dim):
-        super(GumbelSocialTransformer, self).__init__()
+class GumbelSoftmax(nn.Module):
+    def __init__(self, temperature=1.0):
+        super(GumbelSoftmax, self).__init__()
+        self.temperature = temperature
+
+    def sample_gumbel(self, shape, eps=1e-20):
+        U = torch.rand(shape).to(device)
+        return -torch.log(-torch.log(U + eps) + eps)
+
+    def gumbel_softmax_sample(self, logits):
+        y = logits + self.sample_gumbel(logits.size())
+        return F.softmax(y / self.temperature, dim=-1)
+
+    def forward(self, logits):
+        return self.gumbel_softmax_sample(logits)
+
+class PositionalEncoding(nn.Module):
+    def __init__(self, d_model, max_len=5000):
+        super(PositionalEncoding, self).__init__()
+        pe = torch.zeros(max_len, d_model)
+        position = torch.arange(0, max_len, dtype=torch.float).unsqueeze(1)
+        div_term = torch.exp(torch.arange(0, d_model, 2).float() * (-math.log(10000.0) / d_model))
+        pe[:, 0::2] = torch.sin(position * div_term)
+        pe[:, 1::2] = torch.cos(position * div_term)
+        pe = pe.unsqueeze(0).transpose(0, 1)
+        self.register_buffer('pe', pe)
+
+    def forward(self, x):
+        return x + self.pe[:x.size(0), :]
+
+class EnhancedGumbelSocialTransformer(nn.Module):
+    def __init__(self, input_dim, hidden_dim, num_heads, num_layers, output_dim, max_len=100):
+        super(EnhancedGumbelSocialTransformer, self).__init__()
         self.embedding = nn.Linear(input_dim, hidden_dim)
+        self.positional_encoding = PositionalEncoding(hidden_dim, max_len)
         encoder_layer = nn.TransformerEncoderLayer(d_model=hidden_dim, nhead=num_heads)
         self.transformer_encoder = nn.TransformerEncoder(encoder_layer, num_layers=num_layers)
         self.fc_out = nn.Linear(hidden_dim, output_dim)
-    
+        self.gumbel_softmax = GumbelSoftmax()
+
     def forward(self, x):
         x = self.embedding(x)
+        x = self.positional_encoding(x)
         x = self.transformer_encoder(x)
         x = self.fc_out(x)
-        return x
+        return self.gumbel_softmax(x)
 
     def predict(self, agent_positions, agent_velocities):
-        input_data = torch.tensor(agent_positions + agent_velocities, dtype=torch.float32)
-        input_data = input_data.unsqueeze(0)  
+        input_data = torch.tensor(agent_positions + agent_velocities, dtype=torch.float32).unsqueeze(0).to(device)
         predicted_trajectories = self.forward(input_data)
-        return predicted_trajectories.squeeze(0).detach().numpy()
+        return predicted_trajectories.squeeze(0).detach().cpu().numpy()
 
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -193,28 +226,19 @@ class ContinuousRobotNavigationEnv(gym.Env):
         self.previous_position = self.robot_position.copy()
         self.robot_position[0] += action[0]
         self.robot_position[1] += action[1]
-    
         self.robot_position[0] = np.clip(self.robot_position[0], 0, self.grid_size - 1)
         self.robot_position[1] = np.clip(self.robot_position[1], 0, self.grid_size - 1)
-    
         if np.linalg.norm(action) > 0:
             self.robot_orientation = np.arctan2(action[1], action[0])
-    
-        # Prepare data for trajectory prediction
+
         agent_positions, agent_velocities = self.prepare_trajectory_data()
-    
-        # Predict future trajectories using the Gumbel Social Transformer
         predicted_trajectories = self.gumbel_social_transformer.predict(agent_positions, agent_velocities)
-    
-        # Use the predicted trajectories to modify the environment or agent actions
-        # For simplicity, let's print the predicted trajectories
         print(predicted_trajectories)
-    
         self.predict_human_positions()
-    
+
         distance_to_goal = np.linalg.norm(np.array(self.robot_position) - np.array(self.goal_position))
         reward = -distance_to_goal
-    
+
         if distance_to_goal < 0.5: 
             reward += 100  
             done = True
@@ -225,10 +249,8 @@ class ContinuousRobotNavigationEnv(gym.Env):
                 done = True
             else:
                 done = False
-    
-        # Capture frame for GIF
-        self.capture_frame()
 
+        self.capture_frame()
         return self.state, reward, done, {}
 
     def render(self, mode='human'):
@@ -237,21 +259,26 @@ class ContinuousRobotNavigationEnv(gym.Env):
         ax.set_ylim(0, self.grid_size)
         ax.set_aspect('equal')
     
+        # Set the background color
         ax.set_facecolor('lightgray')
         fig.patch.set_facecolor('lightgray')
     
+        # Plot the goal position
         goal = plt.Circle(self.goal_position, 0.5, color='darkgreen')
         ax.add_artist(goal)
     
+        # Plot the robot position
         robot = plt.Circle(self.robot_position, 0.5, color='darkblue')
         ax.add_artist(robot)
         
+        # Add an arrow to indicate the robot's orientation
         arrow_length = 0.5
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
         arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.3, fc='yellow', ec='yellow')
         ax.add_patch(arrow)
     
+        # Plot human positions and their predicted trajectories
         for i, human_pos in enumerate(self.human_positions):
             human = plt.Circle(human_pos, 0.5, color='darkred')
             ax.add_artist(human)
@@ -261,14 +288,17 @@ class ContinuousRobotNavigationEnv(gym.Env):
                     predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
                     ax.add_artist(predicted_circle)
     
+        # Plot the maze walls
         for wall in self.maze_walls:
             x, y, width, height = wall
             rect = plt.Rectangle((x, y), width, height, color='black')
             ax.add_patch(rect)
     
+        # Plot the observation range
         observation_circle = plt.Circle(self.robot_position, self.observation_radius, color='blue', fill=False, linestyle='--')
         ax.add_artist(observation_circle)
     
+        # Save the current frame
         buf = io.BytesIO()
         plt.savefig(buf, format='png')
         buf.seek(0)
@@ -504,7 +534,8 @@ REPLAY_BUFFER_SIZE = 1e6
 BATCH_SIZE = 100
 
 def main():
-    gumbel_social_transformer = GumbelSocialTransformer(input_dim=2, hidden_dim=128, num_heads=4, num_layers=2, output_dim=2)
+    gumbel_social_transformer = EnhancedGumbelSocialTransformer(input_dim=2, hidden_dim=128, num_heads=4, num_layers=2, output_dim=2)
+    gumbel_social_transformer.to(device)
     env = ContinuousRobotNavigationEnv(gumbel_social_transformer)
     state_dim = env.observation_space.shape[0] * env.observation_space.shape[1]  # Flatten the observation space
     action_dim = env.action_space.shape[0]
@@ -513,6 +544,7 @@ def main():
     td3_agent = TD3(state_dim, action_dim, max_action)
     replay_buffer = ReplayBuffer(state_dim, action_dim)
     
+    # Training loop
     num_episodes = 100
     episode_rewards = []
     
@@ -521,7 +553,8 @@ def main():
         episode_reward = 0
         for t in range(100):
             action = td3_agent.select_action(state.flatten())
-            
+    
+            # Incorporate the Gumbel Social Transformer predictions
             agent_positions, agent_velocities = env.prepare_trajectory_data()
             predicted_trajectories = gumbel_social_transformer.predict(agent_positions, agent_velocities)
             print(predicted_trajectories)
@@ -548,3 +581,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
