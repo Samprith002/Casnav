@@ -69,7 +69,6 @@ class InteractionBasedAttentionModel(nn.Module):
                     edge_index.append([i, j])
         return torch.tensor(edge_index, dtype=torch.long).t().contiguous().to(device)
 
-
 class GumbelSoftmax(nn.Module):
     def __init__(self, temperature=1.0):
         super(GumbelSoftmax, self).__init__()
@@ -86,7 +85,6 @@ class GumbelSoftmax(nn.Module):
     def forward(self, logits):
         return self.gumbel_softmax_sample(logits)
 
-
 class PositionalEncoding(nn.Module):
     def __init__(self, d_model, max_len=5000):
         super(PositionalEncoding, self).__init__()
@@ -100,6 +98,7 @@ class PositionalEncoding(nn.Module):
 
     def forward(self, x):
         return x + self.pe[:x.size(0), :]
+
 
 class EnhancedGumbelSocialTransformer(nn.Module):
     def __init__(self, input_dim, hidden_dim, num_heads, num_layers, output_dim, max_len=100):
@@ -123,6 +122,13 @@ class EnhancedGumbelSocialTransformer(nn.Module):
         predicted_trajectories = self.forward(input_data)
         return predicted_trajectories.squeeze(0).detach().cpu().numpy()
 
+import numpy as np
+import gym
+from gym import spaces
+import matplotlib.pyplot as plt
+import imageio
+import torch
+from matplotlib.patches import FancyArrow
 
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -282,25 +288,33 @@ class ContinuousRobotNavigationEnv(gym.Env):
     
         agent_positions, agent_velocities = self.prepare_trajectory_data()
         predicted_trajectories = self.interaction_model.predict(agent_positions, agent_velocities)
-        print(predicted_trajectories)
+    
+        # Use the predicted trajectories to modify the robot's actions
+        for traj in predicted_trajectories:
+            if np.linalg.norm(np.array(self.robot_position) - np.array(traj[:2])) < self.observation_radius:
+                # Assuming traj has the shape [x, y]
+                self.robot_position[0] -= traj[0] * 0.1
+                self.robot_position[1] -= traj[1] * 0.1
+    
         self.predict_human_positions()
 
         distance_to_goal = np.linalg.norm(np.array(self.robot_position) - np.array(self.goal_position))
         reward = -distance_to_goal
-
-        if distance_to_goal < 0.5: 
-            reward += 100  
+    
+        if distance_to_goal < 0.5:
+            reward += 100
             done = True
         else:
             collision = self.check_collision()
             if collision:
-                reward -= 10  
+                reward -= 10
                 done = True
             else:
                 done = False
-
+    
         self.capture_frame()
         return self.state, reward, done, {}
+
 
     def render(self, mode='human'):
         fig, ax = plt.subplots(figsize=(6, 6))
@@ -329,7 +343,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
             if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
                 predicted_positions = self.predicted_human_positions[i]
                 for pos in predicted_positions:
-                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
+                    predicted_circle = plt.Circle(pos, 0.2, color='red', fill=True)
                     ax.add_artist(predicted_circle)
     
         for wall in self.maze_walls:
@@ -368,7 +382,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
             if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
                 predicted_positions = self.predicted_human_positions[i]
                 for pos in predicted_positions:
-                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
+                    predicted_circle = plt.Circle(pos, 0.2, color='red', fill=True)
                     ax.add_artist(predicted_circle)
         for wall in self.maze_walls:
             x, y, width, height = wall
@@ -381,7 +395,6 @@ class ContinuousRobotNavigationEnv(gym.Env):
         buf.seek(0)
         self.frames.append(imageio.imread(buf))
         plt.close()
-
 
 
 from gym.envs.registration import register
@@ -404,7 +417,6 @@ class Actor(nn.Module):
         a = F.relu(self.l1(state))
         a = F.relu(self.l2(a))
         return self.max_action * torch.tanh(self.l3(a))
-
 
 class Critic(nn.Module):
     def __init__(self, state_dim, action_dim):
@@ -592,7 +604,6 @@ def main():
 
             agent_positions, agent_velocities = env.prepare_trajectory_data()
             predicted_trajectories = interaction_model.predict(agent_positions, agent_velocities)
-            print(predicted_trajectories)
 
             next_state, reward, done, _ = env.step(action)
             replay_buffer.add(state.flatten(), action, next_state.flatten(), reward, done)
