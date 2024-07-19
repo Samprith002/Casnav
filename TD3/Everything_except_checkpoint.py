@@ -582,6 +582,15 @@ policy_delay = 2
 REPLAY_BUFFER_SIZE = 1e6
 BATCH_SIZE = 100
 
+import os
+
+def save_checkpoint(state, filename="checkpoint.pth.tar"):
+    torch.save(state, filename)
+
+def load_checkpoint(filename):
+    checkpoint = torch.load(filename)
+    return checkpoint
+
 def main():
     interaction_model = InteractionBasedAttentionModel(input_dim=2, hidden_dim=128, output_dim=2, num_heads=4, num_layers=6)
     interaction_model.to(device)
@@ -595,8 +604,29 @@ def main():
     
     num_episodes = 100
     episode_rewards = []
-    
-    for episode in range(num_episodes):
+    checkpoint_dir = "checkpoints"
+    os.makedirs(checkpoint_dir, exist_ok=True)
+
+    best_reward = -float('inf')
+
+    # Load checkpoint if available
+    checkpoint_path = os.path.join(checkpoint_dir, "checkpoint_latest.pth.tar")
+    if os.path.isfile(checkpoint_path):
+        checkpoint = load_checkpoint(checkpoint_path)
+        td3_agent.actor.load_state_dict(checkpoint['actor_state_dict'])
+        td3_agent.actor_optimizer.load_state_dict(checkpoint['actor_optimizer_state_dict'])
+        td3_agent.critic.load_state_dict(checkpoint['critic_state_dict'])
+        td3_agent.critic_optimizer.load_state_dict(checkpoint['critic_optimizer_state_dict'])
+        replay_buffer = checkpoint['replay_buffer']
+        episode_rewards = checkpoint['episode_rewards']
+        td3_agent.actor_losses = checkpoint['actor_losses']
+        td3_agent.critic_losses = checkpoint['critic_losses']
+        start_episode = checkpoint['episode'] + 1
+        print(f"Resuming training from episode {start_episode}")
+    else:
+        start_episode = 0
+
+    for episode in range(start_episode, num_episodes):
         state = env.reset()
         episode_reward = 0
         for t in range(100):
@@ -604,6 +634,7 @@ def main():
 
             agent_positions, agent_velocities = env.prepare_trajectory_data()
             predicted_trajectories = interaction_model.predict(agent_positions, agent_velocities)
+            print(predicted_trajectories)
 
             next_state, reward, done, _ = env.step(action)
             replay_buffer.add(state.flatten(), action, next_state.flatten(), reward, done)
@@ -615,6 +646,37 @@ def main():
         td3_agent.train(replay_buffer, batch_size=256, beta=0.4)
         episode_rewards.append(episode_reward)
         print(f"Episode {episode}, Reward: {episode_reward}")
+
+        # Save checkpoint every 10 episodes
+        if episode % 10 == 0:
+            checkpoint = {
+                'episode': episode,
+                'actor_state_dict': td3_agent.actor.state_dict(),
+                'actor_optimizer_state_dict': td3_agent.actor_optimizer.state_dict(),
+                'critic_state_dict': td3_agent.critic.state_dict(),
+                'critic_optimizer_state_dict': td3_agent.critic_optimizer.state_dict(),
+                'replay_buffer': replay_buffer,
+                'episode_rewards': episode_rewards,
+                'actor_losses': td3_agent.actor_losses,
+                'critic_losses': td3_agent.critic_losses
+            }
+            save_checkpoint(checkpoint, os.path.join(checkpoint_dir, f"checkpoint_{episode}.pth.tar"))
+
+        # Save best model based on reward
+        if episode_reward > best_reward:
+            best_reward = episode_reward
+            best_checkpoint = {
+                'episode': episode,
+                'actor_state_dict': td3_agent.actor.state_dict(),
+                'actor_optimizer_state_dict': td3_agent.actor_optimizer.state_dict(),
+                'critic_state_dict': td3_agent.critic.state_dict(),
+                'critic_optimizer_state_dict': td3_agent.critic_optimizer.state_dict(),
+                'replay_buffer': replay_buffer,
+                'episode_rewards': episode_rewards,
+                'actor_losses': td3_agent.actor_losses,
+                'critic_losses': td3_agent.critic_losses
+            }
+            save_checkpoint(best_checkpoint, os.path.join(checkpoint_dir, "best_model.pth.tar"))
 
         if env.frames:
             imageio.mimsave(f'episode_{episode}.gif', env.frames, fps=10)
@@ -636,3 +698,4 @@ def main():
 
 if __name__ == "__main__":
     main()
+
