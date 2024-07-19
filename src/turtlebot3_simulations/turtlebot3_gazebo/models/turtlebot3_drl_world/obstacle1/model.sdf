@@ -1,0 +1,53 @@
+<?xml version='1.0'?>
+<sdf version='1.6'>
+    <model name="obstacle1">
+      <link name="link_obstacle1">
+        <collision name="collision">
+          <geometry>
+            <cylinder>
+              <radius>0.16</radius>
+              <length>0.50</length>
+            </cylinder>
+          </geometry>
+        </collision>
+
+        <visual name="visual">
+          <geometry>
+            <cylinder>
+              <radius>0.16</radius>
+              <length>0.50</length>
+            </cylinder>
+          </geometry>
+        </visual>
+      </link>
+      <plugin name="p3d_base_controller_obstacle1" filename="libgazebo_ros_p3d.so">
+        <ros>
+          <namespace>/obstacle</namespace>
+          <remapping>odom:=pose</remapping>
+        </ros>
+        <always_on>true</always_on>
+        <update_rate>10.0</update_rate>
+        <body_name>link_obstacle1</body_name>
+        <topic_name>pose</topic_name>
+        <gaussian_noise>0.0</gaussian_noise>
+        <frame_name>world</frame_name>
+        <xyz_offset>0 0 0</xyz_offset>
+        <rpy_offset>0 0 0</rpy_offset>
+      </plugin>
+      <plugin name="object_controller" filename="libgazebo_ros_planar_move.so">
+        <ros>
+          <namespace>/obstacle1</namespace>
+          <remapping>cmd_vel:=cmd_vel</remapping>
+        </ros>
+        <!-- <commandTopic>deploy</commandTopic> -->
+      </plugin>
+      <plugin name="pose_publisher" filename="libgazebo_ros_p3d.so">
+        <frameName>world</frameName>
+        <ros>
+          <namespace>/obstacle1</namespace>
+          <remapping>pose:=pose</remapping>
+        </ros>
+        <updateRate>10.0</updateRate>
+      </plugin>
+    </model>
+</sdf>
