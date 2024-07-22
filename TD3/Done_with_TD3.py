@@ -1,4 +1,5 @@
 import gym
+import matplotlib.pyplot as plt
 import torch
 import torch.nn as nn
 import torch.optim as optim
@@ -121,14 +122,6 @@ class EnhancedGumbelSocialTransformer(nn.Module):
         input_data = torch.tensor(agent_positions + agent_velocities, dtype=torch.float32).unsqueeze(0).to(device)
         predicted_trajectories = self.forward(input_data)
         return predicted_trajectories.squeeze(0).detach().cpu().numpy()
-
-import numpy as np
-import gym
-from gym import spaces
-import matplotlib.pyplot as plt
-import imageio
-import torch
-from matplotlib.patches import FancyArrow
 
 class ContinuousRobotNavigationEnv(gym.Env):
     metadata = {'render.modes': ['human']}
@@ -343,7 +336,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
             if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
                 predicted_positions = self.predicted_human_positions[i]
                 for pos in predicted_positions:
-                    predicted_circle = plt.Circle(pos, 0.2, color='red', fill=True)
+                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
                     ax.add_artist(predicted_circle)
     
         for wall in self.maze_walls:
@@ -382,7 +375,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
             if np.linalg.norm(np.array(self.robot_position) - np.array(human_pos)) <= self.observation_radius:
                 predicted_positions = self.predicted_human_positions[i]
                 for pos in predicted_positions:
-                    predicted_circle = plt.Circle(pos, 0.2, color='red', fill=True)
+                    predicted_circle = plt.Circle(pos, 0.35, color='indigo', fill=False)
                     ax.add_artist(predicted_circle)
         for wall in self.maze_walls:
             x, y, width, height = wall
@@ -660,7 +653,7 @@ def main():
                 'actor_losses': td3_agent.actor_losses,
                 'critic_losses': td3_agent.critic_losses
             }
-            save_checkpoint(checkpoint, os.path.join(checkpoint_dir, f"checkpoint_{episode}.pth.tar"))
+            save_checkpoint(checkpoint, os.path.join(checkpoint_dir, f"checkpoint_latest.pth.tar"))
 
         # Save best model based on reward
         if episode_reward > best_reward:
