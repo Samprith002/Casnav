@@ -327,7 +327,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         arrow_length = 0.5
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
-        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.3, fc='yellow', ec='yellow')
+        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.4, fc='black', ec='black')
         ax.add_patch(arrow)
     
         for i, human_pos in enumerate(self.human_positions):
@@ -367,7 +367,7 @@ class ContinuousRobotNavigationEnv(gym.Env):
         arrow_length = 0.5
         dx = arrow_length * np.cos(self.robot_orientation)
         dy = arrow_length * np.sin(self.robot_orientation)
-        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.3, fc='yellow', ec='yellow')
+        arrow = FancyArrow(self.robot_position[0], self.robot_position[1], dx, dy, head_width=0.3, head_length=0.4, fc='black', ec='black')
         ax.add_patch(arrow)
         for i, human_pos in enumerate(self.human_positions):
             human = plt.Circle(human_pos, 0.5, color='darkred')
